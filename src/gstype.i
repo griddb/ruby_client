@@ -37,6 +37,11 @@
 %include <std_shared_ptr.i>
 #endif
 
+#if defined(SWIGRUBY)
+#define GS_FALSE 0
+#define GS_TRUE 1
+#endif
+
 %include <typemaps.i>
 %catches(griddb::GSException);
 

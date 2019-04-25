@@ -48,6 +48,8 @@
 %attribute(griddb::ContainerInfo, bool, row_key, get_row_key_assigned, set_row_key_assigned);
 //Read and write attribute ContainerInfo::expiration
 %attribute(griddb::ContainerInfo, griddb::ExpirationInfo*, expiration, get_expiration_info, set_expiration_info);
+//Read only attribute ContainerInfo::column_info_list
+%attributeval(griddb::ContainerInfo, ColumnInfoList, column_info_list, get_column_info_list, set_column_info_list);
 //Read only attribute ExpirationInfo::time
 %attribute(griddb::ExpirationInfo, int, time, get_time, set_time);
 //Read and write attribute ExpirationInfo::unit
@@ -1094,7 +1096,7 @@ griddb::AggregationResult* aggResultTmp = NULL) {
 }
 
 /**
-* Typemaps for ContainerInfo : support keyword parameter ({"name" : str, "columnInfoList" : array, "type" : str, 'rowKey':boolean})
+* Typemaps for ContainerInfo : support keyword parameter ({"name" : str, "column_info_array" : array, "type" : str, 'row_key':boolean})
 */
 %typemap(typecheck) (const GSChar* name, const GSColumnInfo* props, int propsCount,
 GSContainerType type, bool row_key, griddb::ExpirationInfo* expiration) {
@@ -1226,4 +1228,111 @@ GSContainerType type, bool row_key, griddb::ExpirationInfo* expiration) {
   if ($2) {
     delete [] $2;
   }
+}
+
+/**
+ * Typemap for QueryAnalysisEntry.get()
+ */
+%typemap(in, numinputs = 0) (GSQueryAnalysisEntry* queryAnalysis) (GSQueryAnalysisEntry queryAnalysis1) {
+    queryAnalysis1 = GS_QUERY_ANALYSIS_ENTRY_INITIALIZER;
+    $1 = &queryAnalysis1;
+}
+
+%typemap(argout, fragment = "convertStrToObj") (GSQueryAnalysisEntry* queryAnalysis) () {
+    VALUE outList = rb_ary_new();
+    rb_ary_push(outList, INT2NUM($1->id));
+    rb_ary_push(outList, INT2NUM($1->depth));
+    rb_ary_push(outList, SWIG_FromCharPtrAndSize($1->type, strlen($1->type)));
+    rb_ary_push(outList, SWIG_FromCharPtrAndSize($1->type, strlen($1->valueType)));
+    rb_ary_push(outList, SWIG_FromCharPtrAndSize($1->type, strlen($1->value)));
+    rb_ary_push(outList, SWIG_FromCharPtrAndSize($1->type, strlen($1->statement)));
+    $result = outList;
+}
+
+%typemap(freearg) (GSQueryAnalysisEntry* queryAnalysis) {
+    if ($1) {
+        if ($1->statement) {
+            free((void*) $1->statement);
+        }
+        if ($1->type) {
+            free((void*) $1->type);
+        }
+        if ($1->value) {
+            free((void*) $1->value);
+        }
+        if ($1->valueType) {
+            free((void*) $1->valueType);
+        }
+    }
+}
+
+//attribute ContainerInfo.column_info_list
+%typemap(typecheck) (ColumnInfoList*) {
+    try {
+        Check_Type($input, T_ARRAY);
+        $1 = 1;
+    } catch (const std::exception& e) {
+        $1 = 0;
+    }
+}
+%typemap(in) (ColumnInfoList*)
+(int res = 0, VALUE val_info, int size_column, VALUE val, ColumnInfoList info_list) {
+    Check_Type($input, T_ARRAY);
+    $1 = &info_list;
+    $1->size = NUM2INT(rb_funcall($input, rb_intern("length"), 0, NULL));
+    $1->columnInfo = NULL;
+    if ($1->size) {
+        $1->columnInfo = new (nothrow) GSColumnInfo[$1->size]();
+        if ($1->columnInfo == NULL) {
+            %argument_fail(res, "Memory allocation error", $symname, $argnum);
+        }
+        for (int i = 0; i < $1->size; i++) {
+            $1->columnInfo[i].indexTypeFlags = GS_INDEX_FLAG_DEFAULT;
+            val_info = rb_ary_entry($input, i);
+            if (rb_type(val_info) !=  T_ARRAY) {
+                %argument_fail(res, "column info need array for input", $symname, $argnum);
+            }
+            size_column = NUM2INT(rb_funcall(val_info, rb_intern("length"), 0, NULL));
+            if (size_column < 2) {
+                %argument_fail(res, "Expect column info has 3 elements", $symname, $argnum);
+            }
+            val = rb_ary_entry(val_info, 0);
+            if (rb_type(val) != T_STRING) {
+                %argument_fail(res, "column name must be a string", $symname, $argnum);
+            }
+            $1->columnInfo[i].name = StringValuePtr(val);
+            val = rb_ary_entry(val_info, 1);
+            if (rb_type(val) != T_FIXNUM) {
+                %argument_fail(res, "column type is incorrect", $symname, $argnum);
+            }
+            $1->columnInfo[i].type = NUM2INT(val);
+            if (size_column == 2) {
+                $1->columnInfo[i].options = 0;
+            } else if (size_column == 3) {
+                val = rb_ary_entry(val_info, 2);
+                if (rb_type(val) != T_FIXNUM) {
+                    %argument_fail(res, "column options is incorrect", $symname, $argnum);
+                }
+                $1->columnInfo[i].options = NUM2INT(val);
+            } else {
+                %argument_fail(res, "array length for column info is incorrect", $symname, $argnum);
+            }
+        }
+    }
+}
+%typemap(freearg) (ColumnInfoList*) {
+    if ($1->columnInfo != NULL) {
+        delete [] $1->columnInfo;
+    }
+}
+%typemap(out) (ColumnInfoList*) {
+    VALUE out_list = rb_ary_new();
+    for (int i = 0; i < $1->size; i++) {
+        VALUE out_element = rb_ary_new();
+        rb_ary_push(out_element, SWIG_FromCharPtrAndSize(($1->columnInfo)[i].name, strlen(($1->columnInfo)[i].name)));
+        rb_ary_push(out_element, INT2NUM(($1->columnInfo)[i].type));
+        rb_ary_push(out_element, INT2NUM(($1->columnInfo)[i].options));
+        rb_ary_push(out_list, out_element);
+    }
+    $result = out_list;
 }
